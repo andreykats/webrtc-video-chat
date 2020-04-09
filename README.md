@@ -13,6 +13,7 @@ npm install
 Then run the server:
 ```
 node server.js
+```
 
 1. Open http://localhost:3001 in browser
 2. Accept camera and microphone permissions
