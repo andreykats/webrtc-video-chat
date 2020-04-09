@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>WebRTC</title>
+    <script src="socket.io/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/simple-peer/9.6.2/simplepeer.min.js"></script>
+</head>
+
+<body>
+    <div id="app">
+        <video id="my-video" width="640" height="480" autoplay muted></video>
+    </div>
+</body>
+
+<script>
+
+    var myUsername
+    var peers = []
+
+    var constraints = { audio: true, video: true }
+
+    navigator.mediaDevices.getUserMedia(constraints)
+        .then((stream) => {
+            var video = document.querySelector('#my-video')
+            video.srcObject = stream
+
+            video.oncanplay = (e) => {
+                console.log("my stream loaded")
+                myUsername = setUsername()
+                video.play()
+            }
+        })
+        .catch((err) => {
+            console.log(err.name + ": " + err.message)
+        })
+
+
+
+    let socket = io()
+
+    socket.on('login', (data) => {
+        console.log("current users: ", data.numUsers)
+    })
+
+    socket.on('joined', (data) => {
+        console.log(data.username + ' joined')
+        var video = document.querySelector('#my-video')
+        var peer = connectToPeer(true, data, video.srcObject)
+        peers.push(peer)
+    })
+
+    socket.on('signal', (data) => {
+        // If signal is ment for me, pass to the right peer
+        if (data.message.username == myUsername) {
+            console.log(data.username + " sent a signal:", data.message.signal)
+            // If peer already exists, pass the signal
+            peers.forEach(element => {
+                if (element.username == data.username) {
+                    element.peer.signal(data.message.signal)
+                    return
+                }
+            })
+            // Looks like peer doesn't exist, creating a new one
+            var video = document.querySelector('#my-video')
+            var peer = connectToPeer(false, data, video.srcObject)
+            peers.push(peer)
+        }
+    })
+
+    socket.on('left', (data) => {
+        console.log(data.username + ' left')
+        removeVideoElement(data.username)
+        removeUser(data.username)
+    })
+
+    function connectToPeer(initiator, data, stream) {
+        var peer = new SimplePeer({
+            initiator: initiator,
+            stream: stream,
+            trickle: false,
+            // reconnectTimer: 100,
+            // iceTransportPolicy: 'relay',
+            config: {
+                iceServers: [
+                    { urls: "stun:stun.l.google.com:19302" },
+                    {
+                        urls: "turn:numb.viagenie.ca",
+                        username: "webrtc@live.com",
+                        credential: "muazkh"
+                    }
+                ]
+            }
+        })
+
+        if (initiator == false) {
+            peer.signal(data.message.signal)
+        }
+
+        peer.on('error', (err) => {
+            console.log(data.username, + " error:" + err)
+        })
+
+        peer.on('close', () => {
+            console.log(data.username + " connection closed")
+        })
+
+        peer.on('signal', (signal) => {
+            if (signal.type == "offer") {
+                console.log("sending offer:", signal)
+            } else if (signal.type == "answer") {
+                console.log("sending answer:", signal)
+            } else {
+                console.log("sending candidate:", signal)
+            }
+
+            socket.emit("signal", { username: data.username, signal: signal })
+        })
+
+        peer.on('stream', (stream) => {
+            console.log(data.username + " setting stream: " + stream)
+            addVideoElement(data.username, stream)
+        })
+
+        return { username: data.username, peer: peer }
+    }
+
+    function setUsername() {
+        let name = Math.random().toString(36).substr(2, 9)
+        socket.emit('adduser', name)
+        console.log(name + " is my name")
+        return name
+    }
+
+    function removeUser(username) {
+        for (i = 0; i < peers.length; i++) {
+            if (peers[i].username == username) {
+                console.log(username + " destorying peer")
+                peers[i].peer.destroy()
+                peers.pop(i)
+            }
+        }
+    }
+
+    function addVideoElement(id, stream) {
+        console.log(id + " adding video")
+        var video = document.createElement("video")
+        video.setAttribute("id", id)
+        video.setAttribute("width", "640")
+        video.setAttribute("height", "480")
+        // video.muted = true
+        video.controls = true
+        video.srcObject = stream
+
+        video.onerror = (e) => {
+            console.log("video error")
+        }
+
+        video.oncanplay = (e) => {
+            console.log(id + " video can play")
+            video.play()
+        }
+
+        var element = document.getElementById("app")
+        element.appendChild(video)
+    }
+
+    function removeVideoElement(id) {
+        var element = document.getElementById(id)
+        if (element) {
+            element.remove()
+            console.log(id + " video removed")
+        }
+    }
+
+</script>
+
+</html>
